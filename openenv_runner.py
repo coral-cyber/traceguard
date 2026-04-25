@@ -66,7 +66,7 @@ def run_episode(task: str, attack_type: str, auto_contain: bool = True) -> dict:
             "evidence_count":  len(info["evidence"]),
             "is_attack":       info["is_attack"],
             "status":          info["status"],
-            "containment_ms":  info["containment_ms"],
+            "containment_ms":  info.get("containment_ms", 0.0),
             "reward":          reward,
         }
         episode_log["steps"].append(step_data)
@@ -83,7 +83,7 @@ def run_episode(task: str, attack_type: str, auto_contain: bool = True) -> dict:
         "pipeline_status": env.pipeline_status,
         "attacks_detected":env.attacks_detected,
         "false_positives": env.false_positives,
-        "containment_ms":  env.containment_time_ms,
+        "containment_ms":  info.get("containment_ms", 0.0),
     })
 
     # ── [END] ────────────────────────────────────────────────────────────────

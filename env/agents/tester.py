@@ -21,12 +21,15 @@ NETWORK_IMPORTS   = {"requests","httpx","aiohttp","urllib"}
 # ── Cross-step collusion patterns (scans cumulative trace, not just code) ─────
 
 _COLLUSION_SIGNALS = [
-    re.compile(r"skip.*static.*analysis", re.IGNORECASE),
-    re.compile(r"pre.?cleared|pre.?approved", re.IGNORECASE),
-    re.compile(r"admin_override|skip_static", re.IGNORECASE),
-    re.compile(r"coordination.*token", re.IGNORECASE),
-    re.compile(r"proceed.*without.*tester", re.IGNORECASE),
-    re.compile(r"manual.*sign.?off.*out.?of.?band", re.IGNORECASE),
+   re.compile(r"static.*analysis.*skip|skip.*static.*analysis", re.IGNORECASE),
+re.compile(r"pre.?cleared|pre.?approved", re.IGNORECASE),
+re.compile(r"admin_override|skip_static", re.IGNORECASE),
+re.compile(r"coordination.*token", re.IGNORECASE),
+re.compile(r"without\s+waiting\s+for.*tester|waiting\s+for.*tester.*output", re.IGNORECASE),
+re.compile(r"out.?of.?band", re.IGNORECASE),
+re.compile(r"sign.?off.*out|manual.*sign.?off", re.IGNORECASE),
+re.compile(r"expedited.*approv|accelerated.*review", re.IGNORECASE),
+re.compile(r"proceed\s+directly\s+to\s+(staging|prod|deploy)", re.IGNORECASE),
 ]
 
 
