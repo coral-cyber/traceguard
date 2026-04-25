@@ -1,0 +1,24 @@
+{
+  "threat_threshold": 0.65,
+  "quarantine_threshold": 0.65,
+  "auto_rollback_threshold": 0.85,
+  "max_containment_time_ms": 1000,
+  "allowed_agents": ["coder", "reviewer", "tester", "deployer"],
+  "attack_patterns": {
+    "prompt_injection":   { "enabled": true, "weight": 1.0 },
+    "code_injection":     { "enabled": true, "weight": 1.5 },
+    "data_exfiltration":  { "enabled": true, "weight": 1.2 },
+    "collusion":          { "enabled": true, "weight": 2.0 }
+  },
+  "containment_actions": {
+    "ALLOW":     0,
+    "QUARANTINE": 1,
+    "ROLLBACK":  2
+  },
+  "rewards": {
+    "true_positive":  1.0,
+    "true_negative":  0.5,
+    "false_positive": -1.0,
+    "false_negative": -2.0
+  }
+}

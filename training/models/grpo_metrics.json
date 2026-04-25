@@ -1,0 +1,19 @@
+{
+  "model": "GRPO_PolicyNet",
+  "grpo_epochs": 30,
+  "sft_epochs": 5,
+  "group_size": 8,
+  "clip_eps": 0.2,
+  "kl_coef": 0.04,
+  "lambda_v": 0.35,
+  "polyak": 0.995,
+  "final_val_f1": 1.0,
+  "buffer_stats": {
+    "size": 2000,
+    "mean_reward": -0.0375,
+    "pct_attacks": 50.0,
+    "pct_false_neg": 26.2,
+    "alpha": 0.6,
+    "beta": 1.0
+  }
+}
