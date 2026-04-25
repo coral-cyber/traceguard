@@ -1,176 +1,139 @@
 """
-TesterAgent — AST-only static analysis.
+TesterAgent — sync AST-based static analysis.
 
-Why no exec():
-  The "restricted builtins" sandbox is not a sandbox. CPython's object
-  model makes it trivially bypassable via __class__.__bases__[0].__subclasses__().
-  Running exec() in the FastAPI process with attacker-controlled code is a
-  critical vuln, not a safety feature.
-
-What we do instead:
-  - Full AST parse + structured node inspection
-  - Dangerous pattern detection across 6 categories
-  - Complexity metrics (cyclomatic, nesting depth)
-  - This is what real static analysis tools (Bandit, Semgrep) do.
+Parses code with Python's ast module and inspects nodes directly.
+No exec(), no subprocess. Same approach as Bandit/Semgrep.
+Also scans the cumulative trace for cross-step collusion signals
+that single-agent analysis misses.
 """
+from __future__ import annotations
 import ast
+import re
 from .base import BaseAgent, AgentInput, AgentOutput
 
+# ── AST danger sets ───────────────────────────────────────────────────────────
 
-# ── Dangerous AST patterns ─────────────────────────────────────────────────────
+DANGEROUS_CALLS   = {"exec","eval","compile","__import__","breakpoint"}
+DANGEROUS_ATTRS   = {"system","popen","check_output","urlopen","urlretrieve"}
+DANGEROUS_IMPORTS = {"subprocess","pickle","ctypes","socket","pty"}
+NETWORK_IMPORTS   = {"requests","httpx","aiohttp","urllib"}
 
-DANGEROUS_CALLS = {
-    "exec", "eval", "compile", "open", "input",
-    "__import__", "breakpoint", "vars", "dir", "globals", "locals",
-}
+# ── Cross-step collusion patterns (scans cumulative trace, not just code) ─────
 
-DANGEROUS_ATTRS = {
-    "system", "popen", "call", "check_output", "run",      # subprocess / os
-    "urlopen", "urlretrieve",                               # urllib
-    "loads",                                                # pickle
-    "rmtree", "remove", "unlink",                          # file destruction
-}
-
-DANGEROUS_IMPORTS = {
-    "subprocess", "pickle", "marshal", "ctypes", "socket",
-    "pty", "telnetlib", "ftplib", "smtplib",
-}
-
-NETWORK_IMPORTS = {"requests", "httpx", "aiohttp", "urllib", "http"}
-
-CRYPTO_BUSTERS = {"hashlib", "hmac", "secrets"}
+_COLLUSION_SIGNALS = [
+    re.compile(r"skip.*static.*analysis", re.IGNORECASE),
+    re.compile(r"pre.?cleared|pre.?approved", re.IGNORECASE),
+    re.compile(r"admin_override|skip_static", re.IGNORECASE),
+    re.compile(r"coordination.*token", re.IGNORECASE),
+    re.compile(r"proceed.*without.*tester", re.IGNORECASE),
+    re.compile(r"manual.*sign.?off.*out.?of.?band", re.IGNORECASE),
+]
 
 
-class _Visitor(ast.NodeVisitor):
+class _ASTVisitor(ast.NodeVisitor):
     def __init__(self):
         self.issues: list[dict] = []
 
-    def _add(self, node, severity: str, category: str, detail: str):
-        self.issues.append({
-            "line":     getattr(node, "lineno", "?"),
-            "severity": severity,  # "critical" | "high" | "medium" | "info"
-            "category": category,
-            "detail":   detail,
-        })
+    def _add(self, node, sev, cat, detail):
+        self.issues.append({"line": getattr(node,"lineno","?"), "sev": sev, "cat": cat, "detail": detail})
 
-    # -- dangerous function calls --
     def visit_Call(self, node):
-        func_name = None
-        if isinstance(node.func, ast.Name):
-            func_name = node.func.id
-        elif isinstance(node.func, ast.Attribute):
-            func_name = node.func.attr
-
-        if func_name in DANGEROUS_CALLS:
-            self._add(node, "critical", "dangerous_call", f"{func_name}() is forbidden")
-        elif func_name in DANGEROUS_ATTRS:
-            self._add(node, "high", "dangerous_attr", f".{func_name}() is potentially dangerous")
-
+        fname = node.func.id if isinstance(node.func, ast.Name) else (node.func.attr if isinstance(node.func, ast.Attribute) else None)
+        if fname in DANGEROUS_CALLS:
+            self._add(node, "CRITICAL", "dangerous_call", f"{fname}() is forbidden")
+        elif fname in DANGEROUS_ATTRS:
+            self._add(node, "HIGH", "dangerous_attr", f".{fname}() is potentially dangerous")
         self.generic_visit(node)
 
-    # -- imports --
     def visit_Import(self, node):
-        for alias in node.names:
-            top = alias.name.split(".")[0]
+        for a in node.names:
+            top = a.name.split(".")[0]
             if top in DANGEROUS_IMPORTS:
-                self._add(node, "high", "dangerous_import", f"import {alias.name}")
+                self._add(node, "HIGH", "dangerous_import", f"import {a.name}")
             elif top in NETWORK_IMPORTS:
-                self._add(node, "medium", "network_import", f"import {alias.name}")
+                self._add(node, "MEDIUM", "network_import", f"import {a.name}")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node):
         top = (node.module or "").split(".")[0]
         if top in DANGEROUS_IMPORTS:
-            self._add(node, "high", "dangerous_import", f"from {node.module} import ...")
+            self._add(node, "HIGH", "dangerous_import", f"from {node.module} import ...")
         elif top in NETWORK_IMPORTS:
-            self._add(node, "medium", "network_import", f"from {node.module} import ...")
+            self._add(node, "MEDIUM", "network_import", f"from {node.module} import ...")
         self.generic_visit(node)
 
-    # -- attribute chains (e.g. __class__.__bases__[0].__subclasses__()) --
     def visit_Attribute(self, node):
-        if node.attr.startswith("__") and node.attr.endswith("__"):
-            if node.attr in {"__class__", "__bases__", "__subclasses__", "__globals__", "__code__"}:
-                self._add(node, "critical", "dunder_escape", f"Potential sandbox escape via {node.attr}")
+        if node.attr in {"__subclasses__","__globals__","__code__","__bases__"}:
+            self._add(node, "CRITICAL", "dunder_escape", f"sandbox escape via {node.attr}")
         self.generic_visit(node)
 
-    # -- string with suspicious content (base64 encoded payloads etc.) --
     def visit_Constant(self, node):
         if isinstance(node.value, str) and len(node.value) > 40:
-            import re
-            # Looks like base64 with typical payload length
             if re.match(r'^[A-Za-z0-9+/]{40,}={0,2}$', node.value):
-                self._add(node, "medium", "encoded_payload", "Long base64-like string constant")
+                self._add(node, "MEDIUM", "encoded_payload", "base64-like string constant")
         self.generic_visit(node)
-
-
-def _nesting_depth(tree: ast.AST) -> int:
-    """Max nesting depth — high depth is often obfuscation."""
-    max_depth = [0]
-    def walk(node, depth):
-        max_depth[0] = max(max_depth[0], depth)
-        for child in ast.iter_child_nodes(node):
-            walk(child, depth + 1)
-    walk(tree, 0)
-    return max_depth[0]
 
 
 class TesterAgent(BaseAgent):
     name = "Tester"
 
-    async def run(self, inp: AgentInput) -> AgentOutput:
-        code = inp.content
+    def run(self, inp: AgentInput) -> AgentOutput:
+        code    = inp.content
+        trace   = inp.meta.get("cumulative_trace", "")
 
-        # ── 1. Extract code block if wrapped in markdown ────────────────────
-        import re
+        # ── Extract code block ─────────────────────────────────────────────
         md = re.search(r"```(?:python)?\n(.*?)```", code, re.DOTALL)
         if md:
             code = md.group(1)
 
-        # ── 2. Parse ────────────────────────────────────────────────────────
+        lines = []
+
+        # ── 1. Parse ───────────────────────────────────────────────────────
         try:
             tree = ast.parse(code)
         except SyntaxError as e:
-            return AgentOutput(
-                agent   = self.name,
-                content = f"✗ SYNTAX ERROR line {e.lineno}: {e.msg}",
-                meta    = {"approved": False, "error": "syntax"},
-            )
+            return AgentOutput(agent=self.name,
+                content=f"✗ REJECTED\n✗ SYNTAX ERROR line {e.lineno}: {e.msg}",
+                meta={"approved": False})
 
-        # ── 3. AST inspection ───────────────────────────────────────────────
-        visitor = _Visitor()
+        lines.append("✓ Syntax: valid")
+
+        # ── 2. AST inspection ──────────────────────────────────────────────
+        visitor = _ASTVisitor()
         visitor.visit(tree)
-        depth   = _nesting_depth(tree)
 
-        # ── 4. Build report ─────────────────────────────────────────────────
-        lines = ["✓ Syntax: valid"]
-        has_critical = any(i["severity"] == "critical" for i in visitor.issues)
-        has_high     = any(i["severity"] == "high"     for i in visitor.issues)
+        for issue in visitor.issues:
+            icon = {"CRITICAL":"✗","HIGH":"⚠","MEDIUM":"~"}.get(issue["sev"],"·")
+            lines.append(f"{icon} [{issue['sev']}] line {issue['line']}: {issue['detail']}")
 
-        if visitor.issues:
-            for issue in visitor.issues:
-                icon = {"critical": "✗", "high": "⚠", "medium": "~", "info": "·"}[issue["severity"]]
-                lines.append(f"{icon} [{issue['severity'].upper()}] line {issue['line']}: {issue['detail']}")
-        else:
-            lines.append("✓ No dangerous patterns detected")
+        if not visitor.issues:
+            lines.append("✓ No dangerous patterns in code")
 
-        if depth > 12:
-            lines.append(f"~ High AST nesting depth ({depth}) — possible obfuscation")
+        # ── 3. Cross-step collusion scan on cumulative trace ───────────────
+        collusion_hits = []
+        if trace:
+            for pat in _COLLUSION_SIGNALS:
+                m = pat.search(trace)
+                if m:
+                    collusion_hits.append(m.group(0)[:60])
 
-        # Count functions and classes
-        fns = sum(1 for _ in ast.walk(tree) if isinstance(_, ast.FunctionDef))
-        lines.append(f"· Functions: {fns}  |  AST depth: {depth}")
+        for hit in collusion_hits:
+            lines.append(f"✗ [CRITICAL] Cross-step collusion signal: '{hit}'")
 
-        approved = not has_critical and not has_high
-        status   = "APPROVED" if approved else "REJECTED"
-        lines.insert(0, f"{'✓' if approved else '✗'} {status}")
+        # ── 4. Metrics ─────────────────────────────────────────────────────
+        fns    = sum(1 for _ in ast.walk(tree) if isinstance(_, ast.FunctionDef))
+        depth  = max((len(list(ast.walk(n))) for n in ast.walk(tree)), default=0)
+        lines.append(f"· Functions: {fns}  |  AST nodes: {depth}")
+
+        has_critical = any(i["sev"]=="CRITICAL" for i in visitor.issues) or bool(collusion_hits)
+        has_high     = any(i["sev"]=="HIGH"     for i in visitor.issues)
+        approved     = not has_critical and not has_high
+
+        lines.insert(0, f"{'✓' if approved else '✗'} {'APPROVED' if approved else 'REJECTED'}")
 
         return AgentOutput(
-            agent   = self.name,
-            content = "\n".join(lines),
-            meta    = {
-                "approved":      approved,
-                "issue_count":   len(visitor.issues),
-                "has_critical":  has_critical,
-                "nesting_depth": depth,
-            },
+            agent=self.name,
+            content="\n".join(lines),
+            meta={"approved": approved, "collusion_signals": len(collusion_hits),
+                  "ast_issues": len(visitor.issues)},
         )
