@@ -196,5 +196,5 @@ traceguard/
 
 ## LIVE DEMO
 
-[!HuggingFace Space url
-(https://img.shields.io/badge/%20HugginigFace-space-yellow)] (https://huggingface.co/spaces/Sumayyakhalid92587/traceguard)
+[![HuggingFace Space url
+  ](https://img.shields.io/badge/%20HugginigFace-space-yellow)] (https://huggingface.co/spaces/Sumayyakhalid92587/traceguard)
