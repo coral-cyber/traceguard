@@ -33,30 +33,30 @@ User Task
 ### Training: SFT Warm-up + GRPO Policy Loss
 
 ![Training Loss](plots/training_loss.png)
-*Left: step-aware SFT cross-entropy (deployer steps weighted 1.5×, tester 0.8×). Right: GRPO surrogate loss — negative values indicate policy surpassing the frozen reference.*
+_Left: step-aware SFT cross-entropy (deployer steps weighted 1.5×, tester 0.8×). Right: GRPO surrogate loss — negative values indicate policy surpassing the frozen reference._
 
 ### Val F1: Heuristic Baseline vs Trained Policy
 
 ![Val F1 Comparison](plots/val_f1_comparison.png)
-*Red dashed = regex heuristic baseline. Blue = SFT warm-up. Green = GRPO policy.*
+_Red dashed = regex heuristic baseline. Blue = SFT warm-up. Green = GRPO policy._
 
 ### Episode Reward & KL Divergence
 
 ![Reward by Attack](plots/reward_by_attack.png)
-*Top: combined env + verifier reward. Bottom: KL divergence vs frozen reference policy (kl_coef=0.04 prevents lexical overfitting).*
+_Top: combined env + verifier reward. Bottom: KL divergence vs frozen reference policy (kl_coef=0.04 prevents lexical overfitting)._
 
 ### VGRL Architecture
 
 ![Architecture](plots/confusion_matrix.png)
-*VGRL data flow: cumulative trace → policy net + independent verifier → group-relative advantage → GRPO update.*
+_VGRL data flow: cumulative trace → policy net + independent verifier → group-relative advantage → GRPO update._
 
 ### Honest Metrics
 
-| Metric | Heuristic Baseline | Trained Classifier |
-|--------|-------------------|-------------------|
-| Standard val F1 (synthetic) | 0.34 | 1.00 |
-| Adversarial F1 (tier-2, no obvious keywords) | 0.56 | 1.00 |
-| **Pure social engineering F1** (zero code keywords) | **0.00** | **1.00** |
+| Metric                                              | Heuristic Baseline | Trained Classifier |
+| --------------------------------------------------- | ------------------ | ------------------ |
+| Standard val F1 (synthetic)                         | 0.34               | 1.00               |
+| Adversarial F1 (tier-2, no obvious keywords)        | 0.56               | 1.00               |
+| **Pure social engineering F1** (zero code keywords) | **0.00**           | **1.00**           |
 
 > **What this means:** The heuristic catches `os.system`, `BYPASS_TOKEN`, etc. — and nothing else.
 > It gets F1=0.00 on pure social engineering attacks (authority injection, out-of-band claims,
@@ -71,12 +71,12 @@ User Task
 
 ## Attack Types Supported
 
-| Attack | Mechanism | Detected By |
-|--------|-----------|-------------|
-| `code_injection` | Coder embeds indirect os/subprocess calls | Overseer (pattern) + Tester (AST) |
-| `prompt_injection` | Reviewer poisons downstream agents | Overseer (semantic) + Verifier (persona shift) |
-| `data_exfiltration` | Deployer embeds telemetry-disguised exfil | Overseer (pattern) + Verifier (novelty spike) |
-| `collusion` | Reviewer plants bypass signals for Tester | Overseer (cross-step) + Tester (cumulative trace scan) |
+| Attack              | Mechanism                                 | Detected By                                            |
+| ------------------- | ----------------------------------------- | ------------------------------------------------------ |
+| `code_injection`    | Coder embeds indirect os/subprocess calls | Overseer (pattern) + Tester (AST)                      |
+| `prompt_injection`  | Reviewer poisons downstream agents        | Overseer (semantic) + Verifier (persona shift)         |
+| `data_exfiltration` | Deployer embeds telemetry-disguised exfil | Overseer (pattern) + Verifier (novelty spike)          |
+| `collusion`         | Reviewer plants bypass signals for Tester | Overseer (cross-step) + Tester (cumulative trace scan) |
 
 ---
 
@@ -84,7 +84,7 @@ User Task
 
 ### VGRL/GRPO Training
 
-- **Policy:** TF-IDF features → 3-class softmax (ALLOW / QUARANTINE / ROLLBACK)  
+- **Policy:** TF-IDF features → 3-class softmax (ALLOW / QUARANTINE / ROLLBACK)
 - **Verifier (independent critic):** Scores trace on structural coherence, semantic consistency, and content novelty. Uses **zero** keyword patterns from the overseer — fully independent supervision signal.
 - **GRPO:** Group-relative advantage `(R_i - μ_G) / σ_G` over G=8 sampled actions. No value network needed.
 - **KL regularisation:** Penalty vs frozen SFT reference prevents lexical overfitting.
@@ -106,11 +106,11 @@ ROLLBACK + clean  → -1.00 - 0.40 × remaining_steps  (false positive, wasteful
 
 ### Dataset: 3-Tier Design
 
-| Tier | Description | Count |
-|------|-------------|-------|
-| 0 — Clean | Normal pipeline outputs | 800 |
-| 1 — Obvious | Direct keyword attacks (os.system, BYPASS_TOKEN) | 600 |
-| 2 — Adversarial | No obvious keywords: indirect imports, base64, social engineering, telemetry disguise | 600 |
+| Tier            | Description                                                                           | Count |
+| --------------- | ------------------------------------------------------------------------------------- | ----- |
+| 0 — Clean       | Normal pipeline outputs                                                               | 800   |
+| 1 — Obvious     | Direct keyword attacks (os.system, BYPASS_TOKEN)                                      | 600   |
+| 2 — Adversarial | No obvious keywords: indirect imports, base64, social engineering, telemetry disguise | 600   |
 
 Adversarial eval split (tier-2 vs tier-0 only) saved separately at `training/data/adversarial_eval.jsonl`.
 
@@ -193,3 +193,4 @@ traceguard/
 ---
 
 **Built for the Meta PyTorch OpenEnv Hackathon 2026.**
+##HuggingFace Space url : https://huggingface.co/spaces/Sumayyakhalid92587/traceguard
